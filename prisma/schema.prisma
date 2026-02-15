@@ -1,0 +1,111 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Posyandu {
+  posyanduId     String   @id @default(uuid())
+  namaPosyandu   String
+  alamatPosyandu String
+  rt             String
+  rw             String
+  kelurahan      String
+  kecamatan      String
+  kabupatenKota  String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  users          AppUser[]
+  anak           DataAnak[]
+  jadwal         Jadwal[]
+}
+
+model AppUser {
+  userId       String   @id @default(uuid())
+  posyanduId   String
+  nama         String
+  email        String   @unique
+  passwordHash String
+  role         String   @default("kader")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  posyandu     Posyandu? @relation(fields: [posyanduId], references: [posyanduId], onDelete: SetNull)
+}
+
+model DataAnak {
+  anakId        String   @id @default(uuid())
+  posyanduId    String
+  nama          String
+  jenisKelamin  String
+  tempatLahir   String
+  tanggalLahir  DateTime
+  alamatAnak    String
+  rtAnak        String
+  rwAnak        String
+  kelurahan     String
+  kecamatan     String
+  kabupatenKota String
+  namaOrangTua  String
+  nomorOrangTua String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  nik           String  @unique
+
+  posyandu      Posyandu @relation(fields: [posyanduId], references: [posyanduId], onDelete: Cascade)
+  pemeriksaan   Pemeriksaan[]
+  laporan       Laporan[]
+}
+
+model Jadwal {
+  jadwalId     String   @id @default(uuid())
+  posyanduId   String
+  judul        String
+  kegiatan     String
+  scheduledAt  DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  posyandu     Posyandu @relation(fields: [posyanduId], references: [posyanduId], onDelete: Cascade)
+}
+
+model Pemeriksaan {
+  pemeriksaanId       String   @id @default(uuid())
+  anakId              String
+  umurBulan           Int
+  tanggalPemeriksaan  DateTime
+  tinggiCm            Decimal
+  beratKg             Decimal
+  lingkarKepalaCm     Decimal
+
+  
+  lingkarLenganAtasCm Decimal?
+  caraUkur            String?
+  umurTahun           Int      @default(0)
+
+  klasifikasiStunting String
+  saranGizi           String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  anak                DataAnak @relation(fields: [anakId], references: [anakId], onDelete: Cascade)
+
+  @@index([anakId])
+  @@index([tanggalPemeriksaan])
+}
+
+model Laporan {
+  laporanId   String   @id @default(uuid())
+  posyanduId  String
+  fileName    String
+  filePath    String
+  fileSize    Int?
+  mimeType    String?
+  createdAt   DateTime @default(now())
+
+  posyandu Posyandu @relation(fields: [posyanduId], references: [posyanduId])
+}
