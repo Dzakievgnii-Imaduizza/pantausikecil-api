@@ -97,15 +97,3 @@ model Pemeriksaan {
   @@index([anakId])
   @@index([tanggalPemeriksaan])
 }
-
-model Laporan {
-  laporanId   String   @id @default(uuid())
-  posyanduId  String
-  fileName    String
-  filePath    String
-  fileSize    Int?
-  mimeType    String?
-  createdAt   DateTime @default(now())
-
-  posyandu Posyandu @relation(fields: [posyanduId], references: [posyanduId])
-}
