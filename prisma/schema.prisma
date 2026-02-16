@@ -58,7 +58,6 @@ model DataAnak {
 
   posyandu      Posyandu @relation(fields: [posyanduId], references: [posyanduId], onDelete: Cascade)
   pemeriksaan   Pemeriksaan[]
-  laporan       Laporan[]
 }
 
 model Jadwal {
