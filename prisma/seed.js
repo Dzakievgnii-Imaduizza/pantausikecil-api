@@ -1,9 +1,23 @@
 const fs = require("fs");
 const path = require("path");
 const csv = require("csv-parser");
-const { PrismaClient } = require("@prisma/client");
 
-const prisma = new PrismaClient();
+const { PrismaClient } = require("@prisma/client");
+const { PrismaPg } = require("@prisma/adapter-pg");
+
+/* =========================
+   Prisma Adapter Setup
+========================= */
+
+const adapter = new PrismaPg({
+  connectionString: process.env.DATABASE_URL,
+});
+
+const prisma = new PrismaClient({ adapter });
+
+/* =========================
+   Helper Functions
+========================= */
 
 function parseBoolean(val) {
   if (val === "t" || val === "true" || val === true) return true;
@@ -12,7 +26,7 @@ function parseBoolean(val) {
 }
 
 function parseNumber(val) {
-  if (val === "" || val === null || val === undefined) return null;
+  if (!val) return null;
   return Number(val);
 }
 
@@ -20,6 +34,10 @@ function parseDate(val) {
   if (!val) return null;
   return new Date(val);
 }
+
+/* =========================
+   Seed Data Anak
+========================= */
 
 async function seedDataAnak() {
   const results = [];
@@ -31,17 +49,22 @@ async function seedDataAnak() {
       .on("end", async () => {
         try {
           for (const row of results) {
+            if (!row.nama) {
+              console.log("⚠ Skip dataAnak (nama kosong):", row);
+              continue;
+            }
+
             await prisma.dataAnak.create({
               data: {
-                id: parseNumber(row.id),
                 nama: row.nama,
                 tanggal_lahir: parseDate(row.tanggal_lahir),
-                jenis_kelamin: row.jenis_kelamin,
-                nama_ibu: row.nama_ibu,
-                alamat: row.alamat,
+                jenis_kelamin: row.jenis_kelamin || null,
+                nama_ibu: row.nama_ibu || null,
+                alamat: row.alamat || null,
               },
             });
           }
+
           console.log("✔ dataAnak seeded");
           resolve();
         } catch (err) {
@@ -50,6 +73,10 @@ async function seedDataAnak() {
       });
   });
 }
+
+/* =========================
+   Seed Posyandu
+========================= */
 
 async function seedPosyandu() {
   const results = [];
@@ -61,14 +88,19 @@ async function seedPosyandu() {
       .on("end", async () => {
         try {
           for (const row of results) {
+            if (!row.nama) {
+              console.log("⚠ Skip posyandu (nama kosong):", row);
+              continue;
+            }
+
             await prisma.posyandu.create({
               data: {
-                id: parseNumber(row.id),
                 nama: row.nama,
-                alamat: row.alamat,
+                alamat: row.alamat || null,
               },
             });
           }
+
           console.log("✔ posyandu seeded");
           resolve();
         } catch (err) {
@@ -77,6 +109,10 @@ async function seedPosyandu() {
       });
   });
 }
+
+/* =========================
+   Seed Pemeriksaan
+========================= */
 
 async function seedPemeriksaan() {
   const results = [];
@@ -88,9 +124,13 @@ async function seedPemeriksaan() {
       .on("end", async () => {
         try {
           for (const row of results) {
+            if (!row.anakId || !row.posyanduId) {
+              console.log("⚠ Skip pemeriksaan (relasi kosong):", row);
+              continue;
+            }
+
             await prisma.pemeriksaan.create({
               data: {
-                id: parseNumber(row.id),
                 anakId: parseNumber(row.anakId),
                 posyanduId: parseNumber(row.posyanduId),
                 tanggal: parseDate(row.tanggal),
@@ -101,6 +141,7 @@ async function seedPemeriksaan() {
               },
             });
           }
+
           console.log("✔ pemeriksaan seeded");
           resolve();
         } catch (err) {
@@ -109,6 +150,10 @@ async function seedPemeriksaan() {
       });
   });
 }
+
+/* =========================
+   MAIN
+========================= */
 
 async function main() {
   console.log("🚀 Start Seeding...");

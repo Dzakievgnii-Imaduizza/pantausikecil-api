@@ -1,5 +1,7 @@
 // src/controllers/jadwal.controller.js
 const jadwalRepo = require("../repositories/jadwal.repository");
+const { triggerJadwalWebhook } = require("../services/jadwalN8n.service");
+
 
 function requirePosyandu(req, res) {
   const posyanduId = req.user?.posyanduId;
@@ -93,4 +95,36 @@ async function remove(req, res) {
   res.json({ message: "Deleted" });
 }
 
-module.exports = { list, detail, create, update, remove };
+async function trigger(req, res) {
+  const posyanduId = requirePosyandu(req, res);
+  if (!posyanduId) return;
+
+  const item = await jadwalRepo.findByIdAndPosyandu(
+    req.params.id,
+    posyanduId
+  );
+
+  if (!item) {
+    return res.status(404).json({ message: "Not found" });
+  }
+
+  try {
+    await triggerJadwalWebhook({
+      posyanduId: item.posyanduId,
+      judul: item.judul,
+      kegiatan: item.kegiatan,
+      scheduledAt: item.scheduledAt,
+    });
+
+    res.json({ message: "Trigger n8n berhasil dikirim" });
+
+  } catch (err) {
+    res.status(500).json({
+      message: "Gagal trigger n8n",
+      error: err.message,
+    });
+  }
+}
+
+
+module.exports = { list, detail, create, update, remove, trigger };

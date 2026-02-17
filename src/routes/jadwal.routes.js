@@ -11,5 +11,6 @@ router.get("/:id", controller.detail);
 router.post("/", controller.create);
 router.put("/:id", controller.update);
 router.delete("/:id", controller.remove);
+router.post("/:id/trigger", controller.trigger);
 
 module.exports = router;
