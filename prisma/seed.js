@@ -32,38 +32,97 @@ function parseNumber(val) {
 
 function parseDate(val) {
   if (!val) return null;
-  return new Date(val);
+  const s = String(val).trim();
+  if (!s) return null;
+  const iso = s.includes("T") ? s : s.replace(" ", "T");
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
+
 
 /* =========================
    Seed Data Anak
 ========================= */
+
+const csvOptionsAnak = {
+  separator: ",",
+  headers: [
+    "anakId",
+    "posyanduId",
+    "nama",
+    "jenisKelamin",
+    "tempatLahir",
+    "tanggalLahir",
+    "alamatAnak",
+    "rtAnak",
+    "rwAnak",
+    "kecamatan",
+    "kabupatenKota",
+    "namaOrangTua",
+    "nomorOrangTua",
+    "createdAt",
+    "updatedAt",
+    "nik",
+    "kelurahan"
+  ],
+  mapValues: ({ value }) => (typeof value === "string" ? value.trim() : value),
+};
 
 async function seedDataAnak() {
   const results = [];
 
   return new Promise((resolve, reject) => {
     fs.createReadStream(path.join(__dirname, "dataAnak.csv"))
-      .pipe(csv())
+      .pipe(csv(csvOptionsAnak))
       .on("data", (data) => results.push(data))
       .on("end", async () => {
         try {
           for (const row of results) {
-            if (!row.nama) {
-              console.log("⚠ Skip dataAnak (nama kosong):", row);
-              continue;
-            }
+            if (!row.nama) { console.warn("Skip: nama kosong", row); continue; }
+            if (!row.posyanduId) { console.warn("Skip: posyanduId kosong", row); continue; }
+            if (!row.nik) { console.warn("Skip: nik kosong", row); continue; }
 
-            await prisma.dataAnak.create({
-              data: {
+            const tgl = parseDate(row.tanggalLahir);
+            if (!tgl) { console.warn("Skip: tanggalLahir invalid", row); continue; }
+
+            await prisma.dataAnak.upsert({
+              where: { anakId: row.anakId },
+              update: {
+                posyanduId: row.posyanduId,
                 nama: row.nama,
-                tanggal_lahir: parseDate(row.tanggal_lahir),
-                jenis_kelamin: row.jenis_kelamin || null,
-                nama_ibu: row.nama_ibu || null,
-                alamat: row.alamat || null,
+                jenisKelamin: row.jenisKelamin,
+                tempatLahir: row.tempatLahir,
+                tanggalLahir: tgl,
+                alamatAnak: row.alamatAnak,
+                rtAnak: String(row.rtAnak ?? ""),
+                rwAnak: String(row.rwAnak ?? ""),
+                kelurahan: row.kelurahan,
+                kecamatan: row.kecamatan,
+                kabupatenKota: row.kabupatenKota,
+                namaOrangTua: row.namaOrangTua ?? "",
+                nomorOrangTua: row.nomorOrangTua ?? "",
+                nik: String(row.nik),
+              },
+              create: {
+                anakId: row.anakId,
+                posyanduId: row.posyanduId,
+                nama: row.nama,
+                jenisKelamin: row.jenisKelamin,
+                tempatLahir: row.tempatLahir,
+                tanggalLahir: tgl,
+                alamatAnak: row.alamatAnak,
+                rtAnak: String(row.rtAnak ?? ""),
+                rwAnak: String(row.rwAnak ?? ""),
+                kelurahan: row.kelurahan,
+                kecamatan: row.kecamatan,
+                kabupatenKota: row.kabupatenKota,
+                namaOrangTua: row.namaOrangTua ?? "",
+                nomorOrangTua: row.nomorOrangTua ?? "",
+                nik: String(row.nik),
               },
             });
           }
+
 
           console.log("✔ dataAnak seeded");
           resolve();
