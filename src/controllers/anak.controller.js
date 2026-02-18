@@ -50,7 +50,7 @@ async function list(req, res) {
   const finalItems = await Promise.all(
     items.map(async (item) => {
       const pemeriksaan = await pemeriksaanRepo.findByIdLatest(item.anakId);
-      
+
       // Kembalikan objek baru dengan properti statusTerbaru
       return {
         ...item, // Salin semua properti asli
@@ -124,9 +124,8 @@ async function update(req, res) {
   const posyanduId = requirePosyandu(req, res);
   if (!posyanduId) return;
 
-  const anakId = req.params.id; // ini adalah anakId (UUID)
+  const anakId = req.params.id;
 
-  // cek data ada & milik posyandu ini
   const existing = await anakRepo.findByIdForPosyandu(anakId, posyanduId);
   if (!existing) {
     return res.status(404).json({ message: "Data anak tidak ditemukan" });
@@ -138,7 +137,10 @@ async function update(req, res) {
     tanggalLahir,
     kelurahan,
     nik,
-    ...rest
+    alamat,
+    rt,
+    rw,
+    noOrangtua
   } = req.body || {};
 
   // validasi NIK bila dikirim
@@ -148,12 +150,16 @@ async function update(req, res) {
     }
   }
 
-  // siapkan payload update (whitelist field)
   const payload = {
     ...(nama !== undefined && { nama }),
     ...(jenisKelamin !== undefined && { jenisKelamin }),
     ...(kelurahan !== undefined && { kelurahan }),
     ...(nik !== undefined && { nik }),
+    ...(alamat !== undefined && { alamatAnak: alamat }),
+    ...(rt !== undefined && { rtAnak: rt }),
+    ...(rw !== undefined && { rwAnak: rw }),
+    ...(noOrangtua !== undefined && { nomorOrangTua: noOrangtua }),
+
     ...(tanggalLahir !== undefined && {
       tanggalLahir: new Date(tanggalLahir)
     })
@@ -174,6 +180,7 @@ async function update(req, res) {
     throw e;
   }
 }
+
 
 
 

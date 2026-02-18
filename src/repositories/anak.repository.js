@@ -51,8 +51,8 @@ async function remove(anakId) {
   return prisma.dataAnak.delete({ where: { anakId } });
 }
 
-async function countAnak(posyanduId){
-  return prisma.dataAnak.count({where: {posyanduId}})
+async function countAnak(posyanduId) {
+  return prisma.dataAnak.count({ where: { posyanduId } })
 }
 
 async function updateForPosyandu(anakId, posyanduId, data) {
@@ -70,24 +70,39 @@ async function updateForPosyandu(anakId, posyanduId, data) {
 
   const payload = { ...data };
 
-  // normalisasi tanggal
   if (payload.tanggalLahir) {
     payload.tanggalLahir = new Date(payload.tanggalLahir);
   }
 
-  // jangan izinkan overwrite key sensitif
   delete payload.anakId;
   delete payload.posyanduId;
   delete payload.createdAt;
   delete payload.updatedAt;
 
+  const allowed = [
+    "nama",
+    "jenisKelamin",
+    "tanggalLahir",
+    "kelurahan",
+    "nik",
+    "alamatAnak",
+    "rtAnak",
+    "rwAnak",
+    "nomorOrangTua"
+  ];
+
+  const cleanPayload = Object.fromEntries(
+    Object.entries(payload).filter(([key]) => allowed.includes(key))
+  );
+
   return prisma.dataAnak.update({
     where: {
       anakId
     },
-    data: payload
+    data: cleanPayload
   });
 }
+
 
 
 
