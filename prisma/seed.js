@@ -23,6 +23,8 @@ function parseDate(val) {
   if (val === undefined || val === null) return null;
   const s = String(val).trim();
   if (!s) return null;
+
+  // support "YYYY-MM-DD HH:mm:ss.xxx" -> ISO-like
   const iso = s.includes("T") ? s : s.replace(" ", "T");
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? null : d;
@@ -36,13 +38,12 @@ function parseIntStrict(val) {
   return Number.isInteger(n) ? n : null;
 }
 
-// Prisma Decimal aman dikirim sebagai STRING (lebih aman daripada float)
+// Prisma Decimal aman dikirim sebagai STRING
 function parseDecimal(val) {
   if (val === undefined || val === null) return null;
   const s = String(val).trim();
   if (!s) return null;
-  // kalau ada koma desimal
-  return s.replace(",", ".");
+  return s.replace(",", "."); // koma -> titik
 }
 
 function exists(p) {
@@ -53,13 +54,39 @@ function exists(p) {
   }
 }
 
+async function readCsv(filePath, options) {
+  const rows = [];
+  await new Promise((resolve, reject) => {
+    fs.createReadStream(filePath)
+      .pipe(csv(options))
+      .on("data", (d) => rows.push(d))
+      .on("end", resolve)
+      .on("error", reject);
+  });
+  return rows;
+}
+
 /* =========================
-   CSV OPTIONS
-   Catatan:
-   - dataAnak.csv kamu TANPA header → pakai headers: [...]
-   - posyandu.csv & pemeriksaan.csv: di bawah aku set TANPA header juga.
-     Kalau file kamu PAKAI header, set `skipLines: 1` di options-nya.
+   CSV OPTIONS (NO HEADER)
 ========================= */
+
+const trimValue = ({ value }) =>
+  typeof value === "string" ? value.trim() : value;
+
+const csvOptionsAppUser = {
+  separator: ",",
+  headers: [
+    "userId",
+    "posyanduId",
+    "nama",
+    "email",
+    "passwordHash",
+    "role",
+    "createdAt",
+    "updatedAt",
+  ],
+  mapValues: trimValue,
+};
 
 const csvOptionsAnak = {
   separator: ",",
@@ -82,7 +109,7 @@ const csvOptionsAnak = {
     "nik",
     "kelurahan",
   ],
-  mapValues: ({ value }) => (typeof value === "string" ? value.trim() : value),
+  mapValues: trimValue,
 };
 
 const csvOptionsPosyandu = {
@@ -97,8 +124,7 @@ const csvOptionsPosyandu = {
     "kecamatan",
     "kabupatenKota",
   ],
-  mapValues: ({ value }) => (typeof value === "string" ? value.trim() : value),
-  // kalau posyandu.csv kamu PAKAI header, ganti ke: skipLines: 1
+  mapValues: trimValue,
 };
 
 const csvOptionsPemeriksaan = {
@@ -111,65 +137,77 @@ const csvOptionsPemeriksaan = {
     "tinggiCm",
     "beratKg",
     "lingkarKepalaCm",
-    "klasifikasiStunting",  // <-- pindah ke sini (kolom ke-8)
-    "saranGizi",            // <-- kolom ke-9 (string panjang)
-    "createdAt",            // <-- kolom ke-10
-    "updatedAt",            // <-- kolom ke-11
-    "caraUkur",             // <-- kolom ke-12 (Berdiri/Terlentang)
-    "lingkarLenganAtasCm",  // <-- kolom ke-13 (Decimal)
-    "umurTahun",            // <-- kolom ke-14 (Int)
+    "klasifikasiStunting", // kolom 8
+    "saranGizi",           // kolom 9 (string panjang)
+    "createdAt",           // kolom 10
+    "updatedAt",           // kolom 11
+    "caraUkur",            // kolom 12 (Berdiri/Terlentang)
+    "lingkarLenganAtasCm", // kolom 13 (Decimal, boleh kosong)
+    "umurTahun",           // kolom 14 (Int)
   ],
-  mapValues: ({ value }) => (typeof value === "string" ? value.trim() : value),
-  // kalau pemeriksaan.csv kamu PAKAI header, ganti ke: skipLines: 1
+  mapValues: trimValue,
 };
-
 
 /* =========================
    Seed Posyandu
 ========================= */
 
-// fallback: bikin posyandu dari dataAnak.csv berdasarkan posyanduId unik
-async function seedPosyanduFromDataAnakFallback() {
-  console.log("ℹ posyandu.csv tidak ditemukan → buat Posyandu dari dataAnak.csv (placeholder).");
+// placeholder posyandu kalau belum ada
+async function ensurePosyandu(posyanduId, fallback = {}) {
+  if (!posyanduId) return;
 
-  const anakPath = path.join(__dirname, "dataAnak.csv");
-  if (!exists(anakPath)) {
-    console.warn("⚠ dataAnak.csv tidak ditemukan, tidak bisa fallback posyandu.");
-    return;
-  }
-
-  const rows = [];
-  await new Promise((resolve, reject) => {
-    fs.createReadStream(anakPath)
-      .pipe(csv(csvOptionsAnak))
-      .on("data", (d) => rows.push(d))
-      .on("end", resolve)
-      .on("error", reject);
+  await prisma.posyandu.upsert({
+    where: { posyanduId },
+    update: {},
+    create: {
+      posyanduId,
+      namaPosyandu: fallback.namaPosyandu || `Posyandu ${String(posyanduId).slice(0, 8)}`,
+      alamatPosyandu: fallback.alamatPosyandu || "-",
+      rt: String(fallback.rt ?? "0"),
+      rw: String(fallback.rw ?? "0"),
+      kelurahan: fallback.kelurahan || "-",
+      kecamatan: fallback.kecamatan || "-",
+      kabupatenKota: fallback.kabupatenKota || "-",
+    },
   });
+}
+
+// fallback: bikin posyandu dari dataAnak.csv (dan appUser.csv jika ada)
+async function seedPosyanduFallback() {
+  console.log("ℹ posyandu.csv tidak ditemukan → buat Posyandu placeholder dari data CSV.");
 
   const byPosyandu = new Map();
-  for (const r of rows) {
-    if (!r.posyanduId) continue;
-    if (!byPosyandu.has(r.posyanduId)) {
-      byPosyandu.set(r.posyanduId, r);
+
+  const anakPath = path.join(__dirname, "dataAnak.csv");
+  if (exists(anakPath)) {
+    const anakRows = await readCsv(anakPath, csvOptionsAnak);
+    for (const r of anakRows) {
+      if (!r.posyanduId) continue;
+      if (!byPosyandu.has(r.posyanduId)) {
+        byPosyandu.set(r.posyanduId, {
+          rt: r.rtAnak ?? "0",
+          rw: r.rwAnak ?? "0",
+          kelurahan: r.kelurahan ?? "-",
+          kecamatan: r.kecamatan ?? "-",
+          kabupatenKota: r.kabupatenKota ?? "-",
+        });
+      }
     }
   }
 
-  for (const [posyanduId, r] of byPosyandu.entries()) {
-    await prisma.posyandu.upsert({
-      where: { posyanduId },
-      update: {},
-      create: {
-        posyanduId,
-        namaPosyandu: `Posyandu ${String(posyanduId).slice(0, 8)}`,
-        alamatPosyandu: "-",
-        rt: String(r.rtAnak ?? "0"),
-        rw: String(r.rwAnak ?? "0"),
-        kelurahan: r.kelurahan ?? "-",
-        kecamatan: r.kecamatan ?? "-",
-        kabupatenKota: r.kabupatenKota ?? "-",
-      },
-    });
+  const userPath = path.join(__dirname, "appUser.csv");
+  if (exists(userPath)) {
+    const userRows = await readCsv(userPath, csvOptionsAppUser);
+    for (const r of userRows) {
+      if (!r.posyanduId) continue;
+      if (!byPosyandu.has(r.posyanduId)) {
+        byPosyandu.set(r.posyanduId, {});
+      }
+    }
+  }
+
+  for (const [posyanduId, meta] of byPosyandu.entries()) {
+    await ensurePosyandu(posyanduId, meta);
   }
 
   console.log("✔ posyandu (fallback) seeded");
@@ -178,48 +216,97 @@ async function seedPosyanduFromDataAnakFallback() {
 async function seedPosyandu() {
   const posPath = path.join(__dirname, "posyandu.csv");
   if (!exists(posPath)) {
-    await seedPosyanduFromDataAnakFallback();
+    await seedPosyanduFallback();
     return;
   }
 
-  const results = [];
-  await new Promise((resolve, reject) => {
-    fs.createReadStream(posPath)
-      .pipe(csv(csvOptionsPosyandu))
-      .on("data", (d) => results.push(d))
-      .on("end", resolve)
-      .on("error", reject);
-  });
+  const rows = await readCsv(posPath, csvOptionsPosyandu);
 
-  for (const row of results) {
-    if (!row.posyanduId) { console.warn("Skip posyandu: posyanduId kosong", row); continue; }
-    if (!row.namaPosyandu) { console.warn("Skip posyandu: namaPosyandu kosong", row); continue; }
+  for (const r of rows) {
+    if (!r.posyanduId) {
+      console.warn("Skip posyandu: posyanduId kosong", r);
+      continue;
+    }
+    if (!r.namaPosyandu) {
+      console.warn("Skip posyandu: namaPosyandu kosong", r);
+      continue;
+    }
 
     await prisma.posyandu.upsert({
-      where: { posyanduId: row.posyanduId },
+      where: { posyanduId: r.posyanduId },
       update: {
-        namaPosyandu: row.namaPosyandu,
-        alamatPosyandu: row.alamatPosyandu ?? "-",
-        rt: String(row.rt ?? "0"),
-        rw: String(row.rw ?? "0"),
-        kelurahan: row.kelurahan ?? "-",
-        kecamatan: row.kecamatan ?? "-",
-        kabupatenKota: row.kabupatenKota ?? "-",
+        namaPosyandu: r.namaPosyandu,
+        alamatPosyandu: r.alamatPosyandu ?? "-",
+        rt: String(r.rt ?? "0"),
+        rw: String(r.rw ?? "0"),
+        kelurahan: r.kelurahan ?? "-",
+        kecamatan: r.kecamatan ?? "-",
+        kabupatenKota: r.kabupatenKota ?? "-",
       },
       create: {
-        posyanduId: row.posyanduId,
-        namaPosyandu: row.namaPosyandu,
-        alamatPosyandu: row.alamatPosyandu ?? "-",
-        rt: String(row.rt ?? "0"),
-        rw: String(row.rw ?? "0"),
-        kelurahan: row.kelurahan ?? "-",
-        kecamatan: row.kecamatan ?? "-",
-        kabupatenKota: row.kabupatenKota ?? "-",
+        posyanduId: r.posyanduId,
+        namaPosyandu: r.namaPosyandu,
+        alamatPosyandu: r.alamatPosyandu ?? "-",
+        rt: String(r.rt ?? "0"),
+        rw: String(r.rw ?? "0"),
+        kelurahan: r.kelurahan ?? "-",
+        kecamatan: r.kecamatan ?? "-",
+        kabupatenKota: r.kabupatenKota ?? "-",
       },
     });
   }
 
   console.log("✔ posyandu seeded");
+}
+
+/* =========================
+   Seed AppUser
+========================= */
+async function seedAppUser() {
+  const userPath = path.join(__dirname, "appUser.csv");
+  if (!exists(userPath)) {
+    console.warn("⚠ appUser.csv tidak ditemukan, skip seedAppUser()");
+    return;
+  }
+
+  const rows = await readCsv(userPath, csvOptionsAppUser);
+
+  for (const r of rows) {
+    if (!r.userId) { console.warn("Skip AppUser: userId kosong", r); continue; }
+    if (!r.posyanduId) { console.warn("Skip AppUser: posyanduId kosong", r); continue; }
+    if (!r.nama) { console.warn("Skip AppUser: nama kosong", r); continue; }
+    if (!r.email) { console.warn("Skip AppUser: email kosong", r); continue; }
+    if (!r.passwordHash) { console.warn("Skip AppUser: passwordHash kosong", r); continue; }
+
+    // pastikan posyandu ada biar FK aman
+    await ensurePosyandu(r.posyanduId);
+
+    await prisma.appUser.upsert({
+      where: { userId: r.userId },
+      update: {
+        posyanduId: r.posyanduId,
+        nama: r.nama,
+        email: r.email,
+        passwordHash: r.passwordHash,
+        role: r.role || "kader",
+        // createdAt/updatedAt biar default DB saja kalau invalid
+        ...(parseDate(r.createdAt) ? { createdAt: parseDate(r.createdAt) } : {}),
+        ...(parseDate(r.updatedAt) ? { updatedAt: parseDate(r.updatedAt) } : {}),
+      },
+      create: {
+        userId: r.userId,
+        posyanduId: r.posyanduId,
+        nama: r.nama,
+        email: r.email,
+        passwordHash: r.passwordHash,
+        role: r.role || "kader",
+        ...(parseDate(r.createdAt) ? { createdAt: parseDate(r.createdAt) } : {}),
+        ...(parseDate(r.updatedAt) ? { updatedAt: parseDate(r.updatedAt) } : {}),
+      },
+    });
+  }
+
+  console.log("✔ appUser seeded");
 }
 
 /* =========================
@@ -232,58 +319,64 @@ async function seedDataAnak() {
     return;
   }
 
-  const results = [];
-  await new Promise((resolve, reject) => {
-    fs.createReadStream(anakPath)
-      .pipe(csv(csvOptionsAnak))
-      .on("data", (d) => results.push(d))
-      .on("end", resolve)
-      .on("error", reject);
-  });
+  const rows = await readCsv(anakPath, csvOptionsAnak);
 
-  for (const row of results) {
-    if (!row.anakId) { console.warn("Skip: anakId kosong", row); continue; }
-    if (!row.nama) { console.warn("Skip: nama kosong", row); continue; }
-    if (!row.posyanduId) { console.warn("Skip: posyanduId kosong", row); continue; }
-    if (!row.nik) { console.warn("Skip: nik kosong", row); continue; }
+  for (const r of rows) {
+    if (!r.anakId) { console.warn("Skip DataAnak: anakId kosong", r); continue; }
+    if (!r.posyanduId) { console.warn("Skip DataAnak: posyanduId kosong", r); continue; }
+    if (!r.nama) { console.warn("Skip DataAnak: nama kosong", r); continue; }
+    if (!r.nik) { console.warn("Skip DataAnak: nik kosong", r); continue; }
 
-    const tgl = parseDate(row.tanggalLahir);
-    if (!tgl) { console.warn("Skip: tanggalLahir invalid", row); continue; }
+    // pastikan posyandu ada
+    await ensurePosyandu(r.posyanduId, {
+      rt: r.rtAnak,
+      rw: r.rwAnak,
+      kelurahan: r.kelurahan,
+      kecamatan: r.kecamatan,
+      kabupatenKota: r.kabupatenKota,
+    });
+
+    const tgl = parseDate(r.tanggalLahir);
+    if (!tgl) { console.warn("Skip DataAnak: tanggalLahir invalid", r); continue; }
 
     await prisma.dataAnak.upsert({
-      where: { anakId: row.anakId },
+      where: { anakId: r.anakId },
       update: {
-        posyanduId: row.posyanduId,
-        nama: row.nama,
-        jenisKelamin: row.jenisKelamin,
-        tempatLahir: row.tempatLahir,
+        posyanduId: r.posyanduId,
+        nama: r.nama,
+        jenisKelamin: r.jenisKelamin || "-",
+        tempatLahir: r.tempatLahir || "-",
         tanggalLahir: tgl,
-        alamatAnak: row.alamatAnak,
-        rtAnak: String(row.rtAnak ?? ""),
-        rwAnak: String(row.rwAnak ?? ""),
-        kelurahan: row.kelurahan,
-        kecamatan: row.kecamatan,
-        kabupatenKota: row.kabupatenKota,
-        namaOrangTua: row.namaOrangTua ?? "",
-        nomorOrangTua: row.nomorOrangTua ?? "",
-        nik: String(row.nik),
+        alamatAnak: r.alamatAnak || "-",
+        rtAnak: String(r.rtAnak ?? ""),
+        rwAnak: String(r.rwAnak ?? ""),
+        kelurahan: r.kelurahan || "-",
+        kecamatan: r.kecamatan || "-",
+        kabupatenKota: r.kabupatenKota || "-",
+        namaOrangTua: r.namaOrangTua || "-",
+        nomorOrangTua: String(r.nomorOrangTua ?? ""),
+        nik: r.nik,
+        ...(parseDate(r.createdAt) ? { createdAt: parseDate(r.createdAt) } : {}),
+        ...(parseDate(r.updatedAt) ? { updatedAt: parseDate(r.updatedAt) } : {}),
       },
       create: {
-        anakId: row.anakId,
-        posyanduId: row.posyanduId,
-        nama: row.nama,
-        jenisKelamin: row.jenisKelamin,
-        tempatLahir: row.tempatLahir,
+        anakId: r.anakId,
+        posyanduId: r.posyanduId,
+        nama: r.nama,
+        jenisKelamin: r.jenisKelamin || "-",
+        tempatLahir: r.tempatLahir || "-",
         tanggalLahir: tgl,
-        alamatAnak: row.alamatAnak,
-        rtAnak: String(row.rtAnak ?? ""),
-        rwAnak: String(row.rwAnak ?? ""),
-        kelurahan: row.kelurahan,
-        kecamatan: row.kecamatan,
-        kabupatenKota: row.kabupatenKota,
-        namaOrangTua: row.namaOrangTua ?? "",
-        nomorOrangTua: row.nomorOrangTua ?? "",
-        nik: String(row.nik),
+        alamatAnak: r.alamatAnak || "-",
+        rtAnak: String(r.rtAnak ?? ""),
+        rwAnak: String(r.rwAnak ?? ""),
+        kelurahan: r.kelurahan || "-",
+        kecamatan: r.kecamatan || "-",
+        kabupatenKota: r.kabupatenKota || "-",
+        namaOrangTua: r.namaOrangTua || "-",
+        nomorOrangTua: String(r.nomorOrangTua ?? ""),
+        nik: r.nik,
+        ...(parseDate(r.createdAt) ? { createdAt: parseDate(r.createdAt) } : {}),
+        ...(parseDate(r.updatedAt) ? { updatedAt: parseDate(r.updatedAt) } : {}),
       },
     });
   }
@@ -295,51 +388,66 @@ async function seedDataAnak() {
    Seed Pemeriksaan
 ========================= */
 async function seedPemeriksaan() {
-  const pemPath = path.join(__dirname, "pemeriksaan.csv");
-  if (!exists(pemPath)) {
-    console.log("ℹ pemeriksaan.csv tidak ditemukan → skip seedPemeriksaan()");
+  const pPath = path.join(__dirname, "pemeriksaan.csv");
+  if (!exists(pPath)) {
+    console.warn("⚠ pemeriksaan.csv tidak ditemukan, skip seedPemeriksaan()");
     return;
   }
 
-  const results = [];
-  await new Promise((resolve, reject) => {
-    fs.createReadStream(pemPath)
-      .pipe(csv(csvOptionsPemeriksaan))
-      .on("data", (d) => results.push(d))
-      .on("end", resolve)
-      .on("error", reject);
-  });
+  const rows = await readCsv(pPath, csvOptionsPemeriksaan);
 
-  for (const row of results) {
-    if (!row.anakId) { console.warn("Skip pemeriksaan: anakId kosong", row); continue; }
+  for (const r of rows) {
+    if (!r.pemeriksaanId) { console.warn("Skip Pemeriksaan: pemeriksaanId kosong", r); continue; }
+    if (!r.anakId) { console.warn("Skip Pemeriksaan: anakId kosong", r); continue; }
 
-    const umurBulan = parseIntStrict(row.umurBulan);
-    const tgl = parseDate(row.tanggalPemeriksaan);
+    const umurBulan = parseIntStrict(r.umurBulan);
+    const umurTahun = parseIntStrict(r.umurTahun) ?? 0;
+    const tgl = parseDate(r.tanggalPemeriksaan);
 
-    const tinggi = parseDecimal(row.tinggiCm);
-    const berat = parseDecimal(row.beratKg);
-    const lk = parseDecimal(row.lingkarKepalaCm);
+    const tinggi = parseDecimal(r.tinggiCm);
+    const berat = parseDecimal(r.beratKg);
+    const lk = parseDecimal(r.lingkarKepalaCm);
 
-    if (umurBulan === null) { console.warn("Skip pemeriksaan: umurBulan invalid", row); continue; }
-    if (!tgl) { console.warn("Skip pemeriksaan: tanggalPemeriksaan invalid", row); continue; }
-    if (!tinggi || !berat || !lk) { console.warn("Skip pemeriksaan: tinggi/berat/lk kosong", row); continue; }
-    if (!row.klasifikasiStunting) { console.warn("Skip pemeriksaan: klasifikasiStunting kosong", row); continue; }
-    if (!row.saranGizi) { console.warn("Skip pemeriksaan: saranGizi kosong", row); continue; }
+    if (umurBulan === null) { console.warn("Skip Pemeriksaan: umurBulan invalid", r); continue; }
+    if (!tgl) { console.warn("Skip Pemeriksaan: tanggalPemeriksaan invalid", r); continue; }
+    if (!tinggi || !berat || !lk) { console.warn("Skip Pemeriksaan: decimal wajib invalid", r); continue; }
+    if (!r.klasifikasiStunting) { console.warn("Skip Pemeriksaan: klasifikasiStunting kosong", r); continue; }
+    if (!r.saranGizi) { console.warn("Skip Pemeriksaan: saranGizi kosong", r); continue; }
 
-    await prisma.pemeriksaan.create({
-      data: {
-        // pemeriksaanId biarkan auto uuid (lebih aman)
-        anakId: row.anakId,
+    const lila = parseDecimal(r.lingkarLenganAtasCm);
+
+    await prisma.pemeriksaan.upsert({
+      where: { pemeriksaanId: r.pemeriksaanId },
+      update: {
+        anakId: r.anakId,
         umurBulan,
         tanggalPemeriksaan: tgl,
         tinggiCm: tinggi,
         beratKg: berat,
         lingkarKepalaCm: lk,
-        lingkarLenganAtasCm: parseDecimal(row.lingkarLenganAtasCm),
-        caraUkur: row.caraUkur || null,
-        umurTahun: parseIntStrict(row.umurTahun) ?? 0,
-        klasifikasiStunting: row.klasifikasiStunting,
-        saranGizi: row.saranGizi,
+        lingkarLenganAtasCm: lila,
+        caraUkur: r.caraUkur || null,
+        umurTahun,
+        klasifikasiStunting: r.klasifikasiStunting,
+        saranGizi: r.saranGizi,
+        ...(parseDate(r.createdAt) ? { createdAt: parseDate(r.createdAt) } : {}),
+        ...(parseDate(r.updatedAt) ? { updatedAt: parseDate(r.updatedAt) } : {}),
+      },
+      create: {
+        pemeriksaanId: r.pemeriksaanId,
+        anakId: r.anakId,
+        umurBulan,
+        tanggalPemeriksaan: tgl,
+        tinggiCm: tinggi,
+        beratKg: berat,
+        lingkarKepalaCm: lk,
+        lingkarLenganAtasCm: lila,
+        caraUkur: r.caraUkur || null,
+        umurTahun,
+        klasifikasiStunting: r.klasifikasiStunting,
+        saranGizi: r.saranGizi,
+        ...(parseDate(r.createdAt) ? { createdAt: parseDate(r.createdAt) } : {}),
+        ...(parseDate(r.updatedAt) ? { updatedAt: parseDate(r.updatedAt) } : {}),
       },
     });
   }
@@ -348,13 +456,14 @@ async function seedPemeriksaan() {
 }
 
 /* =========================
-   MAIN (URUTAN DIPERBAIKI)
+   MAIN
 ========================= */
 async function main() {
   console.log("🚀 Start Seeding...");
 
-  // Penting: Posyandu dulu → baru DataAnak → baru Pemeriksaan
+  // urutan aman (FK)
   await seedPosyandu();
+  await seedAppUser();   // ✅ tambahan AppUser
   await seedDataAnak();
   await seedPemeriksaan();
 
