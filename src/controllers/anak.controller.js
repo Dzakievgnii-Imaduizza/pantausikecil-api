@@ -138,9 +138,9 @@ async function update(req, res) {
     kelurahan,
     nik,
     alamat,
-    rt,
-    rw,
-    noOrangtua
+    rtAnak,
+    rwAnak,
+    nomorOrangTua,
   } = req.body || {};
 
   // validasi NIK bila dikirim
@@ -156,9 +156,9 @@ async function update(req, res) {
     ...(kelurahan !== undefined && { kelurahan }),
     ...(nik !== undefined && { nik }),
     ...(alamat !== undefined && { alamatAnak: alamat }),
-    ...(rt !== undefined && { rtAnak: rt }),
-    ...(rw !== undefined && { rwAnak: rw }),
-    ...(noOrangtua !== undefined && { nomorOrangTua: noOrangtua }),
+    ...(rtAnak !== undefined && { rtAnak: rtAnak }),
+    ...(rwAnak!== undefined && { rwAnak: rwAnak }),
+    ...( nomorOrangTua !== undefined && { nomorOrangTua:  nomorOrangTua }),
 
     ...(tanggalLahir !== undefined && {
       tanggalLahir: new Date(tanggalLahir)
