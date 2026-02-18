@@ -104,22 +104,25 @@ const csvOptionsPosyandu = {
 const csvOptionsPemeriksaan = {
   separator: ",",
   headers: [
-    "pemeriksaanId",          // boleh kosong (akan auto uuid kalau tidak dipakai)
+    "pemeriksaanId",
     "anakId",
     "umurBulan",
     "tanggalPemeriksaan",
     "tinggiCm",
     "beratKg",
     "lingkarKepalaCm",
-    "lingkarLenganAtasCm",    // optional
-    "caraUkur",               // optional
-    "umurTahun",              // optional
-    "klasifikasiStunting",
-    "saranGizi",
+    "klasifikasiStunting",  // <-- pindah ke sini (kolom ke-8)
+    "saranGizi",            // <-- kolom ke-9 (string panjang)
+    "createdAt",            // <-- kolom ke-10
+    "updatedAt",            // <-- kolom ke-11
+    "caraUkur",             // <-- kolom ke-12 (Berdiri/Terlentang)
+    "lingkarLenganAtasCm",  // <-- kolom ke-13 (Decimal)
+    "umurTahun",            // <-- kolom ke-14 (Int)
   ],
   mapValues: ({ value }) => (typeof value === "string" ? value.trim() : value),
   // kalau pemeriksaan.csv kamu PAKAI header, ganti ke: skipLines: 1
 };
+
 
 /* =========================
    Seed Posyandu
